@@ -5,16 +5,20 @@ Target and scope are documented in ../README.md ("Target classification").
 
 import json
 import sys
+from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
 
 from fetcher import TIMEOUT_S, get_page
 from parse import parse_book, parse_catalogue
+from schema import validate_record
 
 BASE_URL = "https://books.toscrape.com/"
 START_URL = urljoin(BASE_URL, "catalogue/page-1.html")
 MAX_PAGES = 3
+
+OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
 
 
 def discover_books() -> list[tuple[str, str]]:
@@ -52,16 +56,40 @@ def extract_books(books: list[tuple[str, str]]) -> list[dict]:
                 fetched_at=page.fetched_at,
             )
         )
+    print(f"detail_pages={len(records)}")
     return records
+
+
+def validate_all(raw_records: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Validate every record before storing it. Good records are keyed by their
+    canonical product_url, so the same book can only ever count once."""
+    good: dict[str, dict] = {}
+    errors: list[dict] = []
+    for raw in raw_records:
+        record, reason = validate_record(raw)
+        if record is not None:
+            good[record["product_url"]] = record
+        else:
+            errors.append({"product_url": raw.get("product_url"), "reason": reason, "raw": raw})
+    return list(good.values()), errors
+
+
+def write_json(file_name: str, data) -> None:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    (OUTPUT_DIR / file_name).write_text(text, encoding="utf-8", newline="\n")
 
 
 def main() -> None:
     print(f"Target: {BASE_URL} (first {MAX_PAGES} catalogue pages only)")
-    records = extract_books(discover_books())
+    raw_records = extract_books(discover_books())
+    books, errors = validate_all(raw_records)
 
-    print("Sample raw record:")
-    print(json.dumps(records[0], indent=2, ensure_ascii=False))
-    print(f"detail_pages={len(records)}")
+    # Each run rewrites the files from this run's records, so re-running gives
+    # the same 60 records, never an ever-growing pile (idempotency).
+    write_json("books.json", books)
+    write_json("errors.json", errors)
+    print(f"valid_records={len(books)}, invalid_records={len(errors)}")
 
 
 if __name__ == "__main__":
