@@ -1,0 +1,17 @@
+{
+  "started_at": "2026-11-13T14:11:01.982Z",
+  "finished_at": "2026-11-13T14:11:34.781Z",
+  "duration_ms": 32799,
+  "target": "https://books.toscrape.com/",
+  "injected_broken_url": false,
+  "catalogue_pages": 3,
+  "discovered_urls": 60,
+  "unique_urls": 60,
+  "pages_fetched": 63,
+  "cache_hits": 0,
+  "retries": 0,
+  "valid_records": 60,
+  "invalid_records": 0,
+  "failed_pages": 0,
+  "failures": []
+}
