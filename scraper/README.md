@@ -5,10 +5,12 @@ A small, polite web scraper built as a Week 5 internship exercise, written in Py
 ## Run
 
 ```bash
+pip install -r requirements.txt
 python src/main.py
 ```
 
-Requires Python 3.10+.
+Requires Python 3.10+. HTML is parsed with [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/).
+Downloaded pages are cached in `cache/` (git-ignored), so re-runs read from disk instead of hitting the site.
 
 ## Target classification
 
