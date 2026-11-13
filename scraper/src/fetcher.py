@@ -3,6 +3,7 @@
 Every real request: identifying user-agent, timeout, status check, delay.
 """
 
+import hashlib
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -59,10 +60,19 @@ def iso_utc(ts: float) -> str:
     return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+# Long names are cut and given a short hash, so cache paths stay under the
+# 260-character limit Windows applies when the repo lives in a deep folder.
+MAX_CACHE_NAME = 80
+
+
 def cache_name_for(url: str) -> str:
     """https://books.toscrape.com/catalogue/page-1.html -> catalogue-page-1.html"""
     path = urlparse(url).path.lstrip("/")
-    return path.replace("/", "-") or "index.html"
+    name = path.replace("/", "-") or "index.html"
+    if len(name) > MAX_CACHE_NAME:
+        digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:10]
+        name = f"{name[:MAX_CACHE_NAME - 16]}-{digest}.html"
+    return name
 
 
 def polite_delay() -> None:
