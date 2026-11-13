@@ -18,11 +18,32 @@ TIMEOUT_S = 5
 # Minimum gap between real requests to the site. Cache hits skip it.
 REQUEST_DELAY_S = 0.5
 
+# After a timeout or 5xx, wait this long and try exactly once more.
+RETRY_DELAY_S = 2
+
 CACHE_DIR = Path(__file__).resolve().parent.parent / "cache"
 
 _session = requests.Session()
 _session.headers["User-Agent"] = USER_AGENT
 _last_request_at = 0.0
+
+# Counters for the run report.
+stats = {"pages_fetched": 0, "cache_hits": 0, "retries": 0}
+
+
+class FetchError(Exception):
+    """A failed fetch that remembers its HTTP status (None if there was no response)."""
+
+    def __init__(self, message: str, status: int | None = None, timed_out: bool = False):
+        super().__init__(message)
+        self.status = status
+        self.timed_out = timed_out
+
+
+def is_retryable(err: FetchError) -> bool:
+    """Only a timeout or a server error (5xx) is worth one more try.
+    404 = the page does not exist; 403 = the site said no. Never retry those."""
+    return err.timed_out or (err.status is not None and err.status >= 500)
 
 
 @dataclass
@@ -65,19 +86,39 @@ def get_page(url: str) -> Page:
     # Bytes in, bytes out: the cache holds exactly what the server sent.
     if cache_file.exists():
         body = cache_file.read_bytes()
+        stats["cache_hits"] += 1
         print(f"CACHE HIT  {cache_name} ({len(body)} bytes)")
         return Page(body.decode("utf-8"), iso_utc(cache_file.stat().st_mtime), True)
 
-    polite_delay()
-    response = _session.get(url, timeout=TIMEOUT_S)
+    try:
+        body = fetch_once(url)
+    except FetchError as err:
+        if not is_retryable(err):
+            raise
+        stats["retries"] += 1
+        print(f"RETRY      {url} after {err}")
+        time.sleep(RETRY_DELAY_S)
+        body = fetch_once(url)
 
-    # Only 200 means "here is your page". Anything else is a failed fetch.
-    if response.status_code != 200:
-        raise RuntimeError(f"Failed fetch: {url} returned HTTP {response.status_code}")
-
-    body = response.content
     fetched_at = iso_utc(time.time())
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_file.write_bytes(body)
     print(f"FETCH      {url} ({len(body)} bytes)")
     return Page(body.decode("utf-8"), fetched_at, False)
+
+
+def fetch_once(url: str) -> bytes:
+    """One real request to the site."""
+    polite_delay()
+    stats["pages_fetched"] += 1
+    try:
+        response = _session.get(url, timeout=TIMEOUT_S)
+    except requests.Timeout as err:
+        raise FetchError(f"timed out after {TIMEOUT_S} s", timed_out=True) from err
+    except requests.RequestException as err:
+        raise FetchError(f"network error: {err.__class__.__name__}") from err
+
+    # Only 200 means "here is your page". Anything else is a failed fetch.
+    if response.status_code != 200:
+        raise FetchError(f"HTTP {response.status_code}", status=response.status_code)
+    return response.content
